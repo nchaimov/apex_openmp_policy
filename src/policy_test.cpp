@@ -1,15 +1,8 @@
-/******************************************************************************
-* FILE: omp_hello.c
-* DESCRIPTION:
-*   OpenMP Example - Hello World - C/C++ Version
-*   In this simple example, the master thread forks a parallel region.
-*   All threads in the team obtain their unique thread number and print it.
-*   The master thread only prints the total number of threads.  Two OpenMP
-*   library routines are used to obtain the number of threads and each
-*   thread's number.
-* AUTHOR: Blaise Barney  5/99
-* LAST REVISED: 04/06/05
-******************************************************************************/
+//  Copyright (c) 2015 University of Oregon
+//
+//  Distributed under the Boost Software License, Version 1.0. (See accompanying
+//  file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+//
 #include <omp.h>
 #include <stdio.h>
 #include <stdlib.h>

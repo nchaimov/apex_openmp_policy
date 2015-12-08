@@ -29,6 +29,18 @@ else()
     message(FATAL_ERROR " OpenMP not found.")
 endif()
 
+find_library(
+    GOMP_LIBRARY
+    NAMES gomp libgomp 
+    PATHS ${GOMP_ROOT} ${GOMP_ROOT}/build-gcc ${GOMP_ROOT}/build-gcc/lib ${GOMP_ROOT}/lib
+)
+
+if(GOMP_LIBRARY)
+    message(INFO " Found GOMP at ${GOMP_LIBRARY}")
+else()
+    message(INFO " No GOMP")
+endif()
+
 add_definitions(-std=c++14)
 
 add_subdirectory(src)

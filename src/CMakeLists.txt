@@ -5,6 +5,10 @@ set_target_properties(apex_openmp_policy PROPERTIES OUTPUT_NAME apex_openmp_poli
 
 add_executable (policy_test policy_test.cpp)
 
+if(GOMP_LIBRARY)
+    target_link_libraries(policy_test PUBLIC ${GOMP_LIBRARY})
+endif()
+
 INSTALL(TARGETS apex_openmp_policy policy_test
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib

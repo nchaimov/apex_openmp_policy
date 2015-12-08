@@ -3,7 +3,9 @@ target_include_directories(apex_openmp_policy PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
 target_link_libraries(apex_openmp_policy ${LIBS})
 set_target_properties(apex_openmp_policy PROPERTIES OUTPUT_NAME apex_openmp_policy)
 
-INSTALL(TARGETS apex_openmp_policy
+add_executable (policy_test policy_test.cpp)
+
+INSTALL(TARGETS apex_openmp_policy policy_test
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib

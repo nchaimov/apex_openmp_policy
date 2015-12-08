@@ -13,6 +13,22 @@ else()
     message(FATAL_ERROR " APEX not found.")
 endif()
 
+find_package(Boost 1.54.0 REQUIRED COMPONENTS system thread timer chrono regex)
+if(Boost_FOUND)
+    include_directories(${Boost_INCLUDE_DIRS})
+    set(LIBS ${LIBS} ${Boost_LIBRARIES})
+else()
+    message(FATAL_ERROR " Boost not found.")
+endif()
+
+find_package(OpenMP)
+if(OPENMP_FOUND)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+else()
+    message(FATAL_ERROR " OpenMP not found.")
+endif()
+
 add_definitions(-std=c++14)
 
 add_subdirectory(src)

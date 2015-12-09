@@ -18,8 +18,10 @@ int main (int argc, char *argv[]) {
     int final_nthreads_1 = -1;
     int final_nthreads_2 = -1;
 
+    const int iters = 1000;
+
     /* Fork a team of threads giving them their own copies of variables */
-    for(int i = 0; i < 100; ++i) {
+    for(int i = 0; i < 1000; ++i) {
 #pragma omp parallel private(nthreads)
         {
             nthreads = omp_get_num_threads();

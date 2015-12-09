@@ -9,8 +9,11 @@
 #include <memory>
 #include <set>
 #include <utility>
+#include <cstdlib>
+
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/predicate.hpp>
+#include <boost/lexical_cast.hpp>
 
 #include <omp.h>
 
@@ -18,6 +21,7 @@
 #include "apex_policies.hpp"
 
 
+static int window = 1;
 static std::unordered_map<std::string, std::shared_ptr<apex_tuning_request>> requests;
 
 void handle_start(const std::string & name) {
@@ -40,13 +44,19 @@ void handle_start(const std::string & name) {
             } 
             if(profile->calls == 0.0) {
                 std::cerr << "ERROR: calls = 0 for " << name << std::endl;
+                return 0.0;
             }
-            return profile->accumulated;
+            return (profile->accumulated/profile->calls);
         };
         request->set_metric(metric);
 
+        // Set strategy
+        request->set_strategy(apex_ah_tuning_strategy::NELDER_MEAD);
+
+        int max_threads = omp_get_num_procs();
+
         // Create a parameter for number of threads.
-        std::shared_ptr<apex_param_long> param = request->add_param_long("omp_num_threads", 12, 0, 24, 1);
+        std::shared_ptr<apex_param_long> param = request->add_param_long("omp_num_threads", max_threads/2, 1, max_threads, 1);
 
         omp_set_num_threads((int)param->get_value());
 
@@ -65,11 +75,14 @@ void handle_stop(const std::string & name) {
     if(search == requests.end()) {
         std::cerr << "ERROR: Stop received on \"" << name << "\" but we've never seen a start for it." << std::endl;
     } else {
-        std::shared_ptr<apex_tuning_request> request = search->second;
-        // Evaluate the results
-        apex::custom_event(request->get_trigger(), NULL);
-        // Reset counter so each measurement is fresh.
-        apex::reset(name);
+        apex_profile * profile = apex::get_profile(name);
+        if(window == 1 || (profile != nullptr && profile->calls >= window)) {
+            std::shared_ptr<apex_tuning_request> request = search->second;
+            // Evaluate the results
+            apex::custom_event(request->get_trigger(), NULL);
+            // Reset counter so each measurement is fresh.
+            apex::reset(name);
+        }
     }
 };
 
@@ -93,6 +106,10 @@ static apex_policy_handle * start_policy;
 static apex_policy_handle * stop_policy;
 
 int register_policy() {
+    const char * option = std::getenv("APEX_OPENMP_WINDOW");
+    if(option != nullptr) {
+        window = boost::lexical_cast<int>(option);        
+    }
     std::function<int(apex_context const&)> policy_fn{policy};
     start_policy = apex::register_policy(APEX_START_EVENT, policy_fn);    
     stop_policy  = apex::register_policy(APEX_STOP_EVENT,  policy_fn);    

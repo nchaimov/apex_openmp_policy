@@ -10,6 +10,8 @@
 #include <set>
 #include <utility>
 #include <cstdlib>
+#include <stdexcept>
+#include <stdio.h>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/predicate.hpp>
@@ -23,6 +25,32 @@
 
 static int window = 1;
 static std::unordered_map<std::string, std::shared_ptr<apex_tuning_request>> requests;
+
+static void set_omp_params(std::shared_ptr<apex_tuning_request> request) {
+        std::shared_ptr<apex_param_enum> thread_param = std::static_pointer_cast<apex_param_enum>(request->get_param("omp_num_threads"));
+        const int num_threads = boost::lexical_cast<int>(thread_param->get_value());
+
+        std::shared_ptr<apex_param_enum> schedule_param = std::static_pointer_cast<apex_param_enum>(request->get_param("omp_schedule"));
+        const std::string schedule_value = schedule_param->get_value();
+        omp_sched_t schedule = omp_sched_auto;
+        if(schedule_value == "static") {
+            schedule = omp_sched_static;
+        } else if(schedule_value == "dynamic") {
+            schedule = omp_sched_dynamic;
+        } else if(schedule_value == "guided") {
+            schedule = omp_sched_guided;
+        } else {
+            throw std::invalid_argument("omp_schedule");
+        }
+
+        std::shared_ptr<apex_param_enum> chunk_param = std::static_pointer_cast<apex_param_enum>(request->get_param("omp_chunk_size"));
+        const int chunk_size = boost::lexical_cast<int>(chunk_param->get_value());
+
+        //fprintf(stderr, "num_threads: %d, schedule %d, chunk_size %d\n", num_threads, schedule, chunk_size);
+
+        omp_set_num_threads(num_threads);
+        omp_set_schedule(schedule, chunk_size);
+}
 
 void handle_start(const std::string & name) {
     auto search = requests.find(name);
@@ -56,17 +84,23 @@ void handle_start(const std::string & name) {
         int max_threads = omp_get_num_procs();
 
         // Create a parameter for number of threads.
-        std::shared_ptr<apex_param_long> param = request->add_param_long("omp_num_threads", max_threads/2, 1, max_threads, 1);
+        std::shared_ptr<apex_param_enum> threads_param = request->add_param_enum("omp_num_threads", "16", {"2", "4", "8", "16", "24", "32"});
 
-        omp_set_num_threads((int)param->get_value());
+        // Create a parameter for scheduling policy.
+        std::shared_ptr<apex_param_enum> schedule_param = request->add_param_enum("omp_schedule", "static", {"static", "dynamic", "guided"});
+
+        // Create a parameter for chunk size.
+        std::shared_ptr<apex_param_enum> chunk_param = request->add_param_enum("omp_chunk_size", "64", {"1", "8", "32", "64", "128", "256", "512"});
+
+        // Set OpenMP runtime parameters to initial values.
+        set_omp_params(request);
 
         // Start the tuning session.
         apex_tuning_session_handle session = apex::setup_custom_tuning(*request);
     } else {
         // We've seen this region before.
         std::shared_ptr<apex_tuning_request> request = search->second;
-        std::shared_ptr<apex_param_long> param = std::static_pointer_cast<apex_param_long>(request->get_param("omp_num_threads"));
-        omp_set_num_threads((int)param->get_value());
+        set_omp_params(request);
     }
 }
 

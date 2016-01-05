@@ -24,7 +24,9 @@
 
 
 static int window = 1;
+static apex_ah_tuning_strategy strategy = apex_ah_tuning_strategy::NELDER_MEAD;
 static std::unordered_map<std::string, std::shared_ptr<apex_tuning_request>> requests;
+static bool verbose = false;
 
 static void set_omp_params(std::shared_ptr<apex_tuning_request> request) {
         std::shared_ptr<apex_param_enum> thread_param = std::static_pointer_cast<apex_param_enum>(request->get_param("omp_num_threads"));
@@ -46,11 +48,16 @@ static void set_omp_params(std::shared_ptr<apex_tuning_request> request) {
         std::shared_ptr<apex_param_enum> chunk_param = std::static_pointer_cast<apex_param_enum>(request->get_param("omp_chunk_size"));
         const int chunk_size = boost::lexical_cast<int>(chunk_param->get_value());
 
-        //fprintf(stderr, "num_threads: %d, schedule %d, chunk_size %d\n", num_threads, schedule, chunk_size);
+        const char * name = request->get_name().c_str();
+
+        if(verbose) {
+            fprintf(stderr, "name: %s, num_threads: %d, schedule %d, chunk_size %d\n", name, num_threads, schedule, chunk_size);
+        }
 
         omp_set_num_threads(num_threads);
         omp_set_schedule(schedule, chunk_size);
 }
+
 
 void handle_start(const std::string & name) {
     auto search = requests.find(name);
@@ -74,7 +81,11 @@ void handle_start(const std::string & name) {
                 std::cerr << "ERROR: calls = 0 for " << name << std::endl;
                 return 0.0;
             }
-            return (profile->accumulated/profile->calls);
+            double result = profile->accumulated/profile->calls;
+            if(verbose) {
+                fprintf(stderr, "time per call: %f\n", result);
+            }
+            return result;
         };
         request->set_metric(metric);
 
@@ -135,14 +146,59 @@ int policy(const apex_context context) {
     return APEX_NOERROR;
 }
 
+void print_summary() {
+    std::cout << std::endl << "OpenMP final settings: " << std::endl;
+    for(auto request_pair : requests) {
+        auto request = request_pair.second;
+        const std::string & name = request->get_name();
+        const std::string & threads = std::static_pointer_cast<apex_param_enum>(request->get_param("omp_num_threads"))->get_value();
+        const std::string & schedule = std::static_pointer_cast<apex_param_enum>(request->get_param("omp_schedule"))->get_value();
+        const std::string & chunk = std::static_pointer_cast<apex_param_enum>(request->get_param("omp_chunk_size"))->get_value();
+        const std::string converged = request->has_converged() ? "CONVERGED" : "NOT CONVERGED";
+        std::cout << "name: " << name << ", num_threads: " << threads << ", schedule: " << schedule
+            << ", chunk_size: " << chunk << " " << converged << std::endl;
+    }
+    std::cout << std::endl;
+}
 
 static apex_policy_handle * start_policy;
 static apex_policy_handle * stop_policy;
 
 int register_policy() {
+    const char * verbose_option = std::getenv("APEX_OPENMP_VERBOSE");
+    if(verbose_option != nullptr) {
+        verbose = 1;
+    }
     const char * option = std::getenv("APEX_OPENMP_WINDOW");
     if(option != nullptr) {
         window = boost::lexical_cast<int>(option);        
+    }
+    if(verbose) {
+        std::cerr << "Window = " << window << std::endl;
+    }
+    const char * strategy_option = std::getenv("APEX_OPENMP_STRATEGY");
+    std::string strategy_str = (strategy_option == nullptr) ? std::string() : std::string(strategy_option);
+    boost::algorithm::to_upper(strategy_str);
+    if(strategy_str.empty()) {
+        // default
+        strategy = apex_ah_tuning_strategy::NELDER_MEAD;
+        std::cerr << "Using default tuning strategy (NELDER_MEAD)" << std::endl;
+    } else if(strategy_str == "EXHAUSTIVE") {
+        strategy = apex_ah_tuning_strategy::EXHAUSTIVE;
+        std::cerr << "Using EXHAUSTIVE tuning strategy." << std::endl;
+    } else if(strategy_str == "RANDOM") {
+        strategy = apex_ah_tuning_strategy::RANDOM;
+        std::cerr << "Using RANDOM tuning strategy." << std::endl;
+    } else if(strategy_str == "NELDER_MEAD") {
+        strategy = apex_ah_tuning_strategy::NELDER_MEAD;
+        std::cerr << "Using NELDER_MEAD tuning strategy." << std::endl;
+    } else if(strategy_str == "PARALLEL_RANK_ORDER") {
+        strategy = apex_ah_tuning_strategy::PARALLEL_RANK_ORDER;
+        std::cerr << "Using PARALLEL_RANK_ORDER tuning strategy." << std::endl;
+    } else {
+        std::cerr << "Invalid setting for APEX_OPENMP_STRATEGY: " << strategy_str << std::endl;
+        std::cerr << "Will use default of NELDER_MEAD." << std::endl;
+        strategy = apex_ah_tuning_strategy::NELDER_MEAD;
     }
     std::function<int(apex_context const&)> policy_fn{policy};
     start_policy = apex::register_policy(APEX_START_EVENT, policy_fn);    
@@ -157,13 +213,16 @@ int register_policy() {
 extern "C" {
 
     int apex_plugin_init() {
+        fprintf(stderr, "apex_openmp_policy init\n");
         int status =  register_policy();
         return status;
     }
 
     int apex_plugin_finalize() {
+        fprintf(stderr, "apex_openmp_policy finalize\n");
         apex::deregister_policy(start_policy);
         apex::deregister_policy(stop_policy);
+        print_summary();
         return APEX_NOERROR;
     }
 

@@ -16,6 +16,8 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/lexical_cast.hpp>
+#include <boost/thread/locks.hpp>
+#include <boost/thread/shared_mutex.hpp>
 
 #include <omp.h>
 
@@ -23,9 +25,10 @@
 #include "apex_policies.hpp"
 
 
-static int window = 1;
+static int window = 3;
 static apex_ah_tuning_strategy strategy = apex_ah_tuning_strategy::NELDER_MEAD;
 static std::unordered_map<std::string, std::shared_ptr<apex_tuning_request>> requests;
+static boost::shared_mutex request_mutex;
 static bool verbose = false;
 
 static void set_omp_params(std::shared_ptr<apex_tuning_request> request) {
@@ -60,10 +63,12 @@ static void set_omp_params(std::shared_ptr<apex_tuning_request> request) {
 
 
 void handle_start(const std::string & name) {
+    boost::upgrade_lock<boost::shared_mutex> lock(request_mutex);
     auto search = requests.find(name);
     if(search == requests.end()) {
         // Start a new tuning session.
         std::shared_ptr<apex_tuning_request> request{std::make_shared<apex_tuning_request>(name)};
+        boost::upgrade_to_unique_lock<boost::shared_mutex> unique_lock(lock);
         requests.insert(std::make_pair(name, request));
 
         // Create an event to trigger this tuning session.
@@ -116,6 +121,7 @@ void handle_start(const std::string & name) {
 }
 
 void handle_stop(const std::string & name) {
+    boost::shared_lock<boost::shared_mutex> lock(request_mutex);
     auto search = requests.find(name);
     if(search == requests.end()) {
         std::cerr << "ERROR: Stop received on \"" << name << "\" but we've never seen a start for it." << std::endl;
@@ -148,6 +154,7 @@ int policy(const apex_context context) {
 
 void print_summary() {
     std::cout << std::endl << "OpenMP final settings: " << std::endl;
+    boost::shared_lock<boost::shared_mutex> lock(request_mutex);
     for(auto request_pair : requests) {
         auto request = request_pair.second;
         const std::string & name = request->get_name();

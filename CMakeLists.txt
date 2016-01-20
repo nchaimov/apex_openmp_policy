@@ -37,7 +37,7 @@ endif()
 find_library(
     GOMP_LIBRARY
     NAMES gomp libgomp 
-    PATHS ${GOMP_ROOT} ${GOMP_ROOT}/build-gcc ${GOMP_ROOT}/build-gcc/lib ${GOMP_ROOT}/lib
+    PATHS ${GOMP_ROOT} ${GOMP_ROOT}/build-gcc ${GOMP_ROOT}/build-gcc/lib ${GOMP_ROOT}/lib ${OMPT_ROOT} ${OMPT_ROOT}/build-gcc ${OMPT_ROOT}/build-gcc/lib ${OMPT_ROOT}/lib
 )
 
 if(GOMP_LIBRARY)

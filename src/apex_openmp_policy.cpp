@@ -4,6 +4,7 @@
 //  file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 
 #include <iostream>
+#include <fstream>
 #include <string>
 #include <unordered_map>
 #include <memory>
@@ -11,6 +12,8 @@
 #include <utility>
 #include <cstdlib>
 #include <stdexcept>
+#include <chrono>
+#include <ctime>
 #include <stdio.h>
 
 #include <boost/algorithm/string.hpp>
@@ -153,6 +156,11 @@ int policy(const apex_context context) {
 }
 
 void print_summary() {
+    std::time_t time = std::time(NULL);
+    char time_str[128];
+    std::strftime(time_str, 128, "results-%F-%H-%M-%S.csv", std::localtime(&time));
+    std::ofstream results_file(time_str, std::ofstream::out);
+    results_file << "\"name\",\"num_threads\",\"schedule\",\"chunk_size\",\"converged\"" << std::endl;
     std::cout << std::endl << "OpenMP final settings: " << std::endl;
     boost::shared_lock<boost::shared_mutex> lock(request_mutex);
     for(auto request_pair : requests) {
@@ -164,6 +172,7 @@ void print_summary() {
         const std::string converged = request->has_converged() ? "CONVERGED" : "NOT CONVERGED";
         std::cout << "name: " << name << ", num_threads: " << threads << ", schedule: " << schedule
             << ", chunk_size: " << chunk << " " << converged << std::endl;
+        results_file << "\"" << name << "\"," << threads << ",\"" << schedule << "\"," << chunk << ",\"" << converged << "\"" << std::endl;
     }
     std::cout << std::endl;
 }

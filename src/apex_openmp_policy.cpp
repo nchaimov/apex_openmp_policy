@@ -32,7 +32,7 @@
 
 static int apex_openmp_policy_tuning_window = 3;
 static apex_ah_tuning_strategy apex_openmp_policy_tuning_strategy = apex_ah_tuning_strategy::NELDER_MEAD;
-static std::unordered_map<std::string, std::shared_ptr<apex_tuning_request>> apex_openmp_policy_tuning_requests;
+static std::unordered_map<std::string, std::shared_ptr<apex_tuning_request>> * apex_openmp_policy_tuning_requests;
 //static boost::shared_mutex request_mutex;
 static bool apex_openmp_policy_verbose = false;
 static bool apex_openmp_policy_use_history = false;
@@ -71,15 +71,15 @@ static void set_omp_params(std::shared_ptr<apex_tuning_request> request) {
 
 void handle_start(const std::string & name) {
     //boost::upgrade_lock<boost::shared_mutex> lock(request_mutex);
-    auto search = apex_openmp_policy_tuning_requests.find(name);
-    if(search == apex_openmp_policy_tuning_requests.end()) {
+    auto search = apex_openmp_policy_tuning_requests->find(name);
+    if(search == apex_openmp_policy_tuning_requests->end()) {
         // Start a new tuning session.
         if(apex_openmp_policy_verbose) {
             fprintf(stderr, "Starting tuning session for %s\n", name.c_str());
         }
         std::shared_ptr<apex_tuning_request> request{std::make_shared<apex_tuning_request>(name)};
         //boost::upgrade_to_unique_lock<boost::shared_mutex> unique_lock(lock);
-        apex_openmp_policy_tuning_requests.insert(std::make_pair(name, request));
+        apex_openmp_policy_tuning_requests->insert(std::make_pair(name, request));
 
         // Create an event to trigger this tuning session.
         apex_event_type trigger = apex::register_custom_event(name);
@@ -132,8 +132,8 @@ void handle_start(const std::string & name) {
 
 void handle_stop(const std::string & name) {
     //boost::shared_lock<boost::shared_mutex> lock(request_mutex);
-    auto search = apex_openmp_policy_tuning_requests.find(name);
-    if(search == apex_openmp_policy_tuning_requests.end()) {
+    auto search = apex_openmp_policy_tuning_requests->find(name);
+    if(search == apex_openmp_policy_tuning_requests->end()) {
         std::cerr << "ERROR: Stop received on \"" << name << "\" but we've never seen a start for it." << std::endl;
     } else {
         apex_profile * profile = apex::get_profile(name);
@@ -195,7 +195,7 @@ void read_results(const std::string & filename) {
                 boost::remove_erase_if(converged, boost::is_any_of("\""));
                 // Create a dummy tuning request with the values from the results file.
                 std::shared_ptr<apex_tuning_request> request{std::make_shared<apex_tuning_request>(name)};
-                apex_openmp_policy_tuning_requests.insert(std::make_pair(name, request));
+                apex_openmp_policy_tuning_requests->insert(std::make_pair(name, request));
                 std::shared_ptr<apex_param_enum> threads_param = request->add_param_enum("omp_num_threads", threads, {threads});
                 std::shared_ptr<apex_param_enum> schedule_param = request->add_param_enum("omp_schedule", schedule, {schedule});
                 std::shared_ptr<apex_param_enum> chunk_param = request->add_param_enum("omp_chunk_size", chunk_size, {chunk_size});
@@ -216,7 +216,7 @@ void print_summary() {
     results_file << "\"name\",\"num_threads\",\"schedule\",\"chunk_size\",\"converged\"" << std::endl;
     std::cout << std::endl << "OpenMP final settings: " << std::endl;
     //boost::shared_lock<boost::shared_mutex> lock(request_mutex);
-    for(auto request_pair : apex_openmp_policy_tuning_requests) {
+    for(auto request_pair : *apex_openmp_policy_tuning_requests) {
         auto request = request_pair.second;
         const std::string & name = request->get_name();
         const std::string & threads = std::static_pointer_cast<apex_param_enum>(request->get_param("omp_num_threads"))->get_value();
@@ -228,6 +228,8 @@ void print_summary() {
         results_file << "\"" << name << "\"," << threads << ",\"" << schedule << "\"," << chunk << ",\"" << converged << "\"" << std::endl;
     }
     std::cout << std::endl;
+    results_file.flush();
+    results_file.close();
 }
 
 static apex_policy_handle * start_policy;
@@ -304,6 +306,7 @@ extern "C" {
 
     int apex_plugin_init() {
         fprintf(stderr, "apex_openmp_policy init\n");
+        apex_openmp_policy_tuning_requests = new std::unordered_map<std::string, std::shared_ptr<apex_tuning_request>>(); 
         int status =  register_policy();
         return status;
     }
@@ -313,6 +316,7 @@ extern "C" {
         apex::deregister_policy(start_policy);
         apex::deregister_policy(stop_policy);
         print_summary();
+        delete apex_openmp_policy_tuning_requests;
         return APEX_NOERROR;
     }
 

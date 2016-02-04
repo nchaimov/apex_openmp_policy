@@ -105,7 +105,7 @@ void handle_start(const std::string & name) {
         request->set_metric(metric);
 
         // Set apex_openmp_policy_tuning_strategy
-        request->set_strategy(apex_ah_tuning_strategy::NELDER_MEAD);
+        request->set_strategy(apex_openmp_policy_tuning_strategy);
 
         int max_threads = omp_get_num_procs();
 
@@ -173,7 +173,7 @@ void read_results(const std::string & filename) {
     std::ifstream results_file(filename, std::ifstream::in);
     if(!results_file.good()) {
         std::cerr << "Unable to open results file " << filename << std::endl;
-        exit(-1);
+        assert(false);
     } else {
         std::string line;
         std::getline(results_file, line); // ignore first line (header)

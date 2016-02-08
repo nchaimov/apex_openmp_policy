@@ -20,7 +20,6 @@
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/thread/locks.hpp>
-#include <boost/thread/shared_mutex.hpp>
 #include <boost/range/algorithm_ext/erase.hpp>
             
 
@@ -33,9 +32,9 @@
 static int apex_openmp_policy_tuning_window = 3;
 static apex_ah_tuning_strategy apex_openmp_policy_tuning_strategy = apex_ah_tuning_strategy::NELDER_MEAD;
 static std::unordered_map<std::string, std::shared_ptr<apex_tuning_request>> * apex_openmp_policy_tuning_requests;
-//static boost::shared_mutex request_mutex;
 static bool apex_openmp_policy_verbose = false;
 static bool apex_openmp_policy_use_history = false;
+static bool apex_openmp_policy_running = false;
 static std::string apex_openmp_policy_history_file = "";
 
 static void set_omp_params(std::shared_ptr<apex_tuning_request> request) {
@@ -305,19 +304,31 @@ int register_policy() {
 extern "C" {
 
     int apex_plugin_init() {
-        fprintf(stderr, "apex_openmp_policy init\n");
-        apex_openmp_policy_tuning_requests = new std::unordered_map<std::string, std::shared_ptr<apex_tuning_request>>(); 
-        int status =  register_policy();
-        return status;
+        if(!apex_openmp_policy_running) {
+            fprintf(stderr, "apex_openmp_policy init\n");
+            apex_openmp_policy_tuning_requests = new std::unordered_map<std::string, std::shared_ptr<apex_tuning_request>>(); 
+            int status =  register_policy();
+            apex_openmp_policy_running = true;
+            return status;
+        } else {
+            fprintf(stderr, "Unable to start apex_openmp_policy because it is already running.\n");
+            return APEX_ERROR;
+        }
     }
 
     int apex_plugin_finalize() {
-        fprintf(stderr, "apex_openmp_policy finalize\n");
-        apex::deregister_policy(start_policy);
-        apex::deregister_policy(stop_policy);
-        print_summary();
-        delete apex_openmp_policy_tuning_requests;
-        return APEX_NOERROR;
+        if(apex_openmp_policy_running) {
+            fprintf(stderr, "apex_openmp_policy finalize\n");
+            //apex::deregister_policy(start_policy);
+            //apex::deregister_policy(stop_policy);
+            print_summary();
+            delete apex_openmp_policy_tuning_requests;
+            apex_openmp_policy_running = false;
+            return APEX_NOERROR;
+        } else {
+            fprintf(stderr, "Unable to stop apex_openmp_policy because it is not running.\n");
+            return APEX_ERROR;
+        }
     }
 
 }

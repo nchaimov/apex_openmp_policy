@@ -1,3 +1,5 @@
+//  APEX OpenMP Policy
+//
 //  Copyright (c) 2015 University of Oregon
 //
 //  Distributed under the Boost Software License, Version 1.0. (See accompanying
@@ -21,8 +23,10 @@
 #include <boost/lexical_cast.hpp>
 #include <boost/thread/locks.hpp>
 #include <boost/range/algorithm_ext/erase.hpp>
-            
 
+#include <rapidjson/document.h>
+#include <rapidjson/istreamwrapper.h>
+            
 #include <omp.h>
 
 #include "apex_api.hpp"
@@ -36,6 +40,17 @@ static bool apex_openmp_policy_verbose = false;
 static bool apex_openmp_policy_use_history = false;
 static bool apex_openmp_policy_running = false;
 static std::string apex_openmp_policy_history_file = "";
+
+static const std::list<std::string> default_thread_space{"2", "4", "8", "16", "24", "32"};
+static const std::list<std::string> default_schedule_space{"static", "dynamic", "guided"};
+static const std::list<std::string> default_chunk_space{"1", "8", "32", "64", "128", "256", "512"};
+
+static const std::list<std::string> * thread_space = nullptr;
+static const std::list<std::string> * schedule_space = nullptr;
+static const std::list<std::string> * chunk_space = nullptr;
+
+static apex_policy_handle * start_policy;
+static apex_policy_handle * stop_policy;
 
 static void set_omp_params(std::shared_ptr<apex_tuning_request> request) {
         std::shared_ptr<apex_param_enum> thread_param = std::static_pointer_cast<apex_param_enum>(request->get_param("omp_num_threads"));
@@ -109,13 +124,13 @@ void handle_start(const std::string & name) {
         int max_threads = omp_get_num_procs();
 
         // Create a parameter for number of threads.
-        std::shared_ptr<apex_param_enum> threads_param = request->add_param_enum("omp_num_threads", "16", {"2", "4", "8", "16", "24", "32"});
+        std::shared_ptr<apex_param_enum> threads_param = request->add_param_enum("omp_num_threads", "16", *thread_space);
 
         // Create a parameter for scheduling policy.
-        std::shared_ptr<apex_param_enum> schedule_param = request->add_param_enum("omp_schedule", "static", {"static", "dynamic", "guided"});
+        std::shared_ptr<apex_param_enum> schedule_param = request->add_param_enum("omp_schedule", "static", *schedule_space);
 
         // Create a parameter for chunk size.
-        std::shared_ptr<apex_param_enum> chunk_param = request->add_param_enum("omp_chunk_size", "64", {"1", "8", "32", "64", "128", "256", "512"});
+        std::shared_ptr<apex_param_enum> chunk_param = request->add_param_enum("omp_chunk_size", "64", *chunk_space);
 
         // Set OpenMP runtime parameters to initial values.
         set_omp_params(request);
@@ -231,8 +246,149 @@ void print_summary() {
     results_file.close();
 }
 
-static apex_policy_handle * start_policy;
-static apex_policy_handle * stop_policy;
+bool parse_space_file(const std::string & filename) {
+    using namespace rapidjson;
+    std::ifstream space_file(filename, std::ifstream::in);
+    if(!space_file.good()) {
+        std::cerr << "Unable to open parameter space specification file " << filename << std::endl;
+        assert(false);
+        return false;
+    } else {
+        IStreamWrapper space_file_wrapper(space_file);
+        Document document;
+        document.ParseStream(space_file_wrapper);
+        if(!document.IsObject()) {
+            std::cerr << "Parameter space file root must be an object." << std::endl;
+            return false;
+        }
+        if(!document.HasMember("tuning_space")) {
+            std::cerr << "Parameter space file root must contain a member named 'tuning_space'." << std::endl;
+            return false;
+        }
+
+        const auto & tuning_spec = document["tuning_space"];
+        if(!tuning_spec.IsObject()) {
+            std::cerr << "Parameter space file's 'tuning_space' member must be an object." << std::endl;
+            return false;
+        }
+        if(!tuning_spec.HasMember("omp_num_threads")) {
+            std::cerr << "Parameter space file's 'tuning_space' object must contain a member named 'omp_num_threads'" << std::endl;
+            return false;
+        }
+        if(!tuning_spec.HasMember("omp_schedule")) {
+            std::cerr << "Parameter space file's 'tuning_space' object must contain a member named 'omp_schedule'" << std::endl;
+            return false;
+        }
+        if(!tuning_spec.HasMember("omp_chunk_size")) {
+            std::cerr << "Parameter space file's 'tuning_space' object must contain a member named 'omp_chunk_size'" << std::endl;
+            return false;
+        }
+
+        const auto & omp_num_threads_array = tuning_spec["omp_num_threads"];
+        const auto & omp_schedule_array    = tuning_spec["omp_schedule"];
+        const auto & omp_chunk_size_array  = tuning_spec["omp_chunk_size"];
+
+        // Validate array types
+        if(!omp_num_threads_array.IsArray()) {
+            std::cerr << "Parameter space file's 'omp_num_threads' member must be an array." << std::endl;
+            return false;
+        }
+        if(!omp_schedule_array.IsArray()) {
+            std::cerr << "Parameter space file's 'omp_schedule' member must be an array." << std::endl;
+            return false;
+        }
+        if(!omp_chunk_size_array.IsArray()) {
+            std::cerr << "Parameter space file's 'omp_chunk_size' member must be an array." << std::endl;
+            return false;
+        }
+
+        // omp_num_threads
+        std::list<std::string> num_threads_list;
+        for(auto itr = omp_num_threads_array.Begin(); itr != omp_num_threads_array.End(); ++itr) {
+              if(itr->IsInt()) {
+                  const int this_num_threads = itr->GetInt();
+                  const std::string this_num_threads_str = boost::lexical_cast<std::string>(this_num_threads);
+                  num_threads_list.push_back(this_num_threads_str);
+              } else if(itr->IsString()) {
+                  const char * this_num_threads = itr->GetString();
+                  const std::string this_num_threads_str = std::string(this_num_threads, itr->GetStringLength());
+                  num_threads_list.push_back(this_num_threads_str);
+              } else {
+                  std::cerr << "Parameter space file's 'omp_num_threads' member must contain only integers or strings" << std::endl;
+                  return false;
+              }
+        }
+        thread_space = new std::list<std::string>{num_threads_list};
+        
+        // omp_schedule
+        std::list<std::string> schedule_list;
+        for(auto itr = omp_schedule_array.Begin(); itr != omp_schedule_array.End(); ++itr) {
+              if(itr->IsString()) {
+                  const char * this_schedule = itr->GetString();
+                  const std::string this_schedule_str = std::string(this_schedule, itr->GetStringLength());
+                  schedule_list.push_back(this_schedule_str);
+              } else {
+                  std::cerr << "Parameter space file's 'omp_schedule' member must contain only strings" << std::endl;
+                  return false;
+              }
+        }
+        schedule_space = new std::list<std::string>{schedule_list};
+
+        // omp_chunk_size
+        std::list<std::string> chunk_size_list;
+        for(auto itr = omp_chunk_size_array.Begin(); itr != omp_chunk_size_array.End(); ++itr) {
+              if(itr->IsInt()) {
+                  const int this_chunk_size = itr->GetInt();
+                  const std::string this_chunk_size_str = boost::lexical_cast<std::string>(this_chunk_size);
+                  chunk_size_list.push_back(this_chunk_size_str);
+              } else if(itr->IsString()) {
+                  const char * this_chunk_size = itr->GetString();
+                  const std::string this_chunk_size_str = std::string(this_chunk_size, itr->GetStringLength());
+                  chunk_size_list.push_back(this_chunk_size_str);
+              } else {
+                  std::cerr << "Parameter space file's 'omp_chunk_size' member must contain only integers or strings" << std::endl;
+                  return false;
+              }
+        }
+        chunk_space = new std::list<std::string>{chunk_size_list};
+        
+    }
+    return true;
+}
+
+void print_tuning_space() {
+    std::cerr << "Tuning space: " << std::endl;
+    std::cerr << "\tomp_num_threads: ";
+    if(thread_space == nullptr) {
+        std::cerr << "NULL";
+    } else {
+        for(auto num_threads : *thread_space) {
+            std::cerr << num_threads << " ";
+        }
+    }
+    std::cerr << std::endl;
+
+    std::cerr << "\tomp_schedule: ";
+    if(schedule_space == nullptr) {
+        std::cerr << "NULL";
+    } else {
+        for(auto schedule : *schedule_space) {
+            std::cerr << schedule << " ";
+        }
+    }
+    std::cerr << std::endl;
+
+    std::cerr << "\tomp_chunk_size: ";
+    if(chunk_space == nullptr) {
+        std::cerr < "NULL";
+    } else {
+        for(auto chunk_size : *chunk_space) {
+            std::cerr << chunk_size << " ";
+        }
+    }
+    std::cerr << std::endl;
+}
+
 
 int register_policy() {
     // Process environment variables
@@ -286,11 +442,41 @@ int register_policy() {
             apex_openmp_policy_use_history = true;
         }
     }
-
     if(apex_openmp_policy_use_history) {
         read_results(apex_openmp_policy_history_file);
     }
 
+    // APEX_OPENMP_SPACE
+    const char * apex_openmp_policy_space_file_option = std::getenv("APEX_OPENMP_SPACE");
+    bool using_space_file = false;
+    if(apex_openmp_policy_space_file_option != nullptr) {
+        const std::string apex_opemp_policy_space_file{apex_openmp_policy_space_file_option};
+        using_space_file = parse_space_file(apex_opemp_policy_space_file);
+        if(!using_space_file) {
+            std::cerr << "WARNING: Unable to use tuning space file " << apex_openmp_policy_space_file_option << ". Using default tuning space instead." << std::endl;
+        }
+    } 
+
+    // Set up the search spaces
+    if(!using_space_file) {
+        if(apex_openmp_policy_verbose) {
+            std::cerr << "Using default tuning space." << std::endl;
+        }
+        thread_space   = &default_thread_space;
+        schedule_space = &default_schedule_space;
+        chunk_space    = &default_chunk_space;
+    } else {
+        if(apex_openmp_policy_verbose) {
+            std::cerr << "Using tuning space from " << apex_openmp_policy_space_file_option << std::endl;
+        }
+    }
+
+    if(apex_openmp_policy_verbose) {
+        print_tuning_space();
+    }
+
+
+    // Register the policy functions with APEX
     std::function<int(apex_context const&)> policy_fn{policy};
     start_policy = apex::register_policy(APEX_START_EVENT, policy_fn);    
     stop_policy  = apex::register_policy(APEX_STOP_EVENT,  policy_fn);    

@@ -65,6 +65,8 @@ static void set_omp_params(std::shared_ptr<apex_tuning_request> request) {
             schedule = omp_sched_dynamic;
         } else if(schedule_value == "guided") {
             schedule = omp_sched_guided;
+        } else if(schedule_value == "auto") {
+            schedule = omp_sched_auto;
         } else {
             throw std::invalid_argument("omp_schedule");
         }

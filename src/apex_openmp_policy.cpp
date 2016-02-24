@@ -165,19 +165,20 @@ void handle_stop(const std::string & name) {
 
 int policy(const apex_context context) {
     if(context.data == nullptr) {
-        // This is an address-identified timer.
-        // Skip it.
-        // FIXME apex_context.data should be a timer_event_data
-        // referencing a task_identifier
+        std::cerr << "ERROR: No task_identifier for event!" << std::endl;
+        return APEX_ERROR;
+    }
+    apex::task_identifier * id = (apex::task_identifier *) context.data;
+    if(!id->has_name) {
+        // Skip events without names.
         return APEX_NOERROR;
     }
+    std::string name = id->get_name();
     if(context.event_type == APEX_START_EVENT) {
-        std::string name{*((std::string *) context.data)};
         if(boost::starts_with(name, "OpenMP_PARALLEL_REGION")) {
             handle_start(name);
         }
     } else if(context.event_type == APEX_STOP_EVENT) {
-        std::string name{*((std::string *) context.data)};
         if(boost::starts_with(name, "OpenMP_PARALLEL_REGION")) {
             handle_stop(name);
         }

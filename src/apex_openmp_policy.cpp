@@ -18,12 +18,6 @@
 #include <ctime>
 #include <stdio.h>
 
-#include <boost/algorithm/string.hpp>
-#include <boost/algorithm/string/predicate.hpp>
-#include <boost/lexical_cast.hpp>
-#include <boost/thread/locks.hpp>
-#include <boost/range/algorithm_ext/erase.hpp>
-
 #include <rapidjson/document.h>
 #include <rapidjson/istreamwrapper.h>
             
@@ -53,8 +47,9 @@ static apex_policy_handle * start_policy;
 static apex_policy_handle * stop_policy;
 
 static void set_omp_params(std::shared_ptr<apex_tuning_request> request) {
+	//std::cout << __func__ << std::endl;
         std::shared_ptr<apex_param_enum> thread_param = std::static_pointer_cast<apex_param_enum>(request->get_param("omp_num_threads"));
-        const int num_threads = boost::lexical_cast<int>(thread_param->get_value());
+        const int num_threads = atoi(thread_param->get_value().c_str());
 
         std::shared_ptr<apex_param_enum> schedule_param = std::static_pointer_cast<apex_param_enum>(request->get_param("omp_schedule"));
         const std::string schedule_value = schedule_param->get_value();
@@ -72,7 +67,7 @@ static void set_omp_params(std::shared_ptr<apex_tuning_request> request) {
         }
 
         std::shared_ptr<apex_param_enum> chunk_param = std::static_pointer_cast<apex_param_enum>(request->get_param("omp_chunk_size"));
-        const int chunk_size = boost::lexical_cast<int>(chunk_param->get_value());
+        const int chunk_size = atoi(chunk_param->get_value().c_str());
 
         const char * name = request->get_name().c_str();
 
@@ -86,7 +81,7 @@ static void set_omp_params(std::shared_ptr<apex_tuning_request> request) {
 
 
 void handle_start(const std::string & name) {
-    //boost::upgrade_lock<boost::shared_mutex> lock(request_mutex);
+	//std::cout << __func__ << std::endl;
     auto search = apex_openmp_policy_tuning_requests->find(name);
     if(search == apex_openmp_policy_tuning_requests->end()) {
         // Start a new tuning session.
@@ -94,7 +89,6 @@ void handle_start(const std::string & name) {
             fprintf(stderr, "Starting tuning session for %s\n", name.c_str());
         }
         std::shared_ptr<apex_tuning_request> request{std::make_shared<apex_tuning_request>(name)};
-        //boost::upgrade_to_unique_lock<boost::shared_mutex> unique_lock(lock);
         apex_openmp_policy_tuning_requests->insert(std::make_pair(name, request));
 
         // Create an event to trigger this tuning session.
@@ -147,7 +141,7 @@ void handle_start(const std::string & name) {
 }
 
 void handle_stop(const std::string & name) {
-    //boost::shared_lock<boost::shared_mutex> lock(request_mutex);
+	//std::cout << __func__ << std::endl;
     auto search = apex_openmp_policy_tuning_requests->find(name);
     if(search == apex_openmp_policy_tuning_requests->end()) {
         std::cerr << "ERROR: Stop received on \"" << name << "\" but we've never seen a start for it." << std::endl;
@@ -164,6 +158,7 @@ void handle_stop(const std::string & name) {
 };
 
 int policy(const apex_context context) {
+	//std::cout << __func__ << std::endl;
     if(context.data == nullptr) {
         std::cerr << "ERROR: No task_identifier for event!" << std::endl;
         return APEX_ERROR;
@@ -175,15 +170,35 @@ int policy(const apex_context context) {
     }
     std::string name = id->get_name();
     if(context.event_type == APEX_START_EVENT) {
-        if(boost::starts_with(name, "OpenMP_PARALLEL_REGION")) {
+        if(name.find("OpenMP_PARALLEL_REGION") == 0) {
             handle_start(name);
         }
     } else if(context.event_type == APEX_STOP_EVENT) {
-        if(boost::starts_with(name, "OpenMP_PARALLEL_REGION")) {
+        if(name.find("OpenMP_PARALLEL_REGION") == 0) {
             handle_stop(name);
         }
     }        
     return APEX_NOERROR;
+}
+
+void Tokenize(const std::string& str,
+                      std::vector<std::string>& tokens,
+                      const std::string& delimiters = ",")
+{
+    // Skip delimiters at beginning.
+    std::string::size_type lastPos = str.find_first_not_of(delimiters, 0);
+    // Find first "non-delimiter".
+    std::string::size_type pos     = str.find_first_of(delimiters, lastPos);
+
+    while (std::string::npos != pos || std::string::npos != lastPos)
+    {
+        // Found a token, add it to the vector.
+        tokens.push_back(str.substr(lastPos, pos - lastPos));
+        // Skip delimiters.  Note the "not_of"
+        lastPos = str.find_first_not_of(delimiters, pos);
+        // Find next "non-delimiter"
+        pos = str.find_first_of(delimiters, lastPos);
+    }
 }
 
 void read_results(const std::string & filename) {
@@ -197,7 +212,7 @@ void read_results(const std::string & filename) {
         while(!results_file.eof()) {
             std::getline(results_file, line);
             std::vector<std::string> parts;
-            boost::split(parts, line, boost::is_any_of(","));
+            Tokenize(line, parts);
             if(parts.size() == 5) {
                 std::string & name = parts[0];
                 std::string & threads = parts[1];
@@ -205,11 +220,11 @@ void read_results(const std::string & filename) {
                 std::string & chunk_size = parts[3];
                 std::string & converged = parts[4];
                 // Remove quotes from strings
-                boost::remove_erase_if(name, boost::is_any_of("\""));
-                boost::remove_erase_if(threads, boost::is_any_of("\""));
-                boost::remove_erase_if(schedule, boost::is_any_of("\""));
-                boost::remove_erase_if(chunk_size, boost::is_any_of("\""));
-                boost::remove_erase_if(converged, boost::is_any_of("\""));
+                name.erase(std::remove(name.begin(), name.end(), '"'), name.end());
+                threads.erase(std::remove(threads.begin(), threads.end(), '"'), threads.end());
+                schedule.erase(std::remove(schedule.begin(), schedule.end(), '"'), schedule.end());
+                chunk_size.erase(std::remove(chunk_size.begin(), chunk_size.end(), '"'), chunk_size.end());
+                converged.erase(std::remove(converged.begin(), converged.end(), '"'), converged.end());
                 // Create a dummy tuning request with the values from the results file.
                 std::shared_ptr<apex_tuning_request> request{std::make_shared<apex_tuning_request>(name)};
                 apex_openmp_policy_tuning_requests->insert(std::make_pair(name, request));
@@ -232,7 +247,6 @@ void print_summary() {
     std::ofstream results_file(time_str, std::ofstream::out);
     results_file << "\"name\",\"num_threads\",\"schedule\",\"chunk_size\",\"converged\"" << std::endl;
     std::cout << std::endl << "OpenMP final settings: " << std::endl;
-    //boost::shared_lock<boost::shared_mutex> lock(request_mutex);
     for(auto request_pair : *apex_openmp_policy_tuning_requests) {
         auto request = request_pair.second;
         const std::string & name = request->get_name();
@@ -310,7 +324,7 @@ bool parse_space_file(const std::string & filename) {
         for(auto itr = omp_num_threads_array.Begin(); itr != omp_num_threads_array.End(); ++itr) {
               if(itr->IsInt()) {
                   const int this_num_threads = itr->GetInt();
-                  const std::string this_num_threads_str = boost::lexical_cast<std::string>(this_num_threads);
+                  const std::string this_num_threads_str = std::to_string(this_num_threads);
                   num_threads_list.push_back(this_num_threads_str);
               } else if(itr->IsString()) {
                   const char * this_num_threads = itr->GetString();
@@ -342,7 +356,7 @@ bool parse_space_file(const std::string & filename) {
         for(auto itr = omp_chunk_size_array.Begin(); itr != omp_chunk_size_array.End(); ++itr) {
               if(itr->IsInt()) {
                   const int this_chunk_size = itr->GetInt();
-                  const std::string this_chunk_size_str = boost::lexical_cast<std::string>(this_chunk_size);
+                  const std::string this_chunk_size_str = std::to_string(this_chunk_size);
                   chunk_size_list.push_back(this_chunk_size_str);
               } else if(itr->IsString()) {
                   const char * this_chunk_size = itr->GetString();
@@ -383,7 +397,7 @@ void print_tuning_space() {
 
     std::cerr << "\tomp_chunk_size: ";
     if(chunk_space == nullptr) {
-        std::cerr < "NULL";
+        std::cerr << "NULL";
     } else {
         for(auto chunk_size : *chunk_space) {
             std::cerr << chunk_size << " ";
@@ -405,7 +419,7 @@ int register_policy() {
     // APEX_OPENMP_WINDOW
     const char * option = std::getenv("APEX_OPENMP_WINDOW");
     if(option != nullptr) {
-        apex_openmp_policy_tuning_window = boost::lexical_cast<int>(option);        
+        apex_openmp_policy_tuning_window = atoi(option);        
     }
     if(apex_openmp_policy_verbose) {
         std::cerr << "apex_openmp_policy_tuning_window = " << apex_openmp_policy_tuning_window << std::endl;
@@ -414,7 +428,9 @@ int register_policy() {
     // APEX_OPENMP_STRATEGY
     const char * apex_openmp_policy_tuning_strategy_option = std::getenv("APEX_OPENMP_STRATEGY");
     std::string apex_openmp_policy_tuning_strategy_str = (apex_openmp_policy_tuning_strategy_option == nullptr) ? std::string() : std::string(apex_openmp_policy_tuning_strategy_option);
-    boost::algorithm::to_upper(apex_openmp_policy_tuning_strategy_str);
+    transform(apex_openmp_policy_tuning_strategy_str.begin(), 
+       apex_openmp_policy_tuning_strategy_str.end(), 
+       apex_openmp_policy_tuning_strategy_str.begin(), ::toupper);
     if(apex_openmp_policy_tuning_strategy_str.empty()) {
         // default
         apex_openmp_policy_tuning_strategy = apex_ah_tuning_strategy::NELDER_MEAD;
@@ -493,6 +509,7 @@ int register_policy() {
 extern "C" {
 
     int apex_plugin_init() {
+		std::cout << __func__ << std::endl;
         if(!apex_openmp_policy_running) {
             fprintf(stderr, "apex_openmp_policy init\n");
             apex_openmp_policy_tuning_requests = new std::unordered_map<std::string, std::shared_ptr<apex_tuning_request>>(); 
@@ -506,6 +523,7 @@ extern "C" {
     }
 
     int apex_plugin_finalize() {
+		std::cout << __func__ << std::endl;
         if(apex_openmp_policy_running) {
             fprintf(stderr, "apex_openmp_policy finalize\n");
             //apex::deregister_policy(start_policy);

@@ -13,7 +13,7 @@
 #include <iostream>
 
 int main (int argc, char *argv[]) {
-    int nthreads;  
+	int nthreads;
 
     int final_nthreads_1 = -1;
     int final_chunk_size_1 = -1;
@@ -23,13 +23,28 @@ int main (int argc, char *argv[]) {
     int final_chunk_size_2 = -1;
     int final_schedule_2 = -1;
 
-    const int iters = 1000;
+    int iters = 1000;
+
+	if (argc == 1) {
+		std::cout << "No iterations specified. Using default of " << iters << "." << std::endl;
+	} else if (argc == 2) {
+	    iters = atoi(argv[1]);
+	} else {
+		std::cout << "Usage: " << argv[0] << " [num iterations]" << std::endl;
+		exit(0);
+	}
+
+    std::cout << "IN MAIN" << std::endl;
 
     /* Fork a team of threads giving them their own copies of variables */
-    for(int i = 0; i < 1000; ++i) {
+    for(int i = 0; i < iters; ++i) {
+    	//std::cout << "Iteration: " << i << std::endl;;
+
 #pragma omp parallel private(nthreads)
         {
             nthreads = omp_get_num_threads();
+			//#pragma omp single
+			//{ std::cout << "numthreads: " << nthreads << std::endl; }
             omp_sched_t sched;
             int chunk_size;
             omp_get_schedule(&sched, &chunk_size);
@@ -97,7 +112,6 @@ int main (int argc, char *argv[]) {
         std::cerr << "Test failed." << std::endl;
     }
     std::cerr << std::endl;
-
 
 }
 
